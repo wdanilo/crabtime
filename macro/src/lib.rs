@@ -16,11 +16,13 @@ use proc_macro2::TokenStream;
 use proc_macro2::TokenTree;
 use quote::ToTokens;
 use quote::quote;
+use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::default::Default;
 use std::fmt::Debug;
 use std::fs;
 use std::fs::File;
+use std::fs::canonicalize;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::io::Write;
@@ -609,12 +611,46 @@ impl CargoConfig {
             .and_then(toml::Value::as_str)
     }
 
-    fn get_package_version<'t>(table: &'t toml::Table, name: &str) -> Option<&'t toml::Value> {
-        table
-            .get("dependencies")
-            .and_then(toml::Value::as_table)
-            .and_then(|pkg_table| pkg_table.get(name))
-            .filter(|v| v.is_str())
+    fn get_package_version<'t>(
+        deps: &'t toml::Table,
+        workspace_deps: Option<&'t toml::Table>,
+        name: &str,
+        paths: &Paths,
+    ) -> Option<Cow<'t, toml::Value>> {
+        let mut value = deps.get(name).map(Cow::Borrowed)?;
+
+        let is_workspace = Self::is_workspace_table(&value);
+        if let Some(workspace_table) = workspace_deps {
+            value = Cow::Borrowed(workspace_table.get(name)?);
+        } else if is_workspace {
+            return None;
+        }
+
+        if let Some(toml::Value::String(path)) = value.get("path") {
+            let base: PathBuf = path.into();
+            let cargo_paths = paths.cargo_toml_path.as_ref()?;
+            let cargo_toml_path =
+                if is_workspace && let Some(workspace_config) = &cargo_paths.workspace_config {
+                    workspace_config
+                } else {
+                    &cargo_paths.crate_config
+                };
+            let cargo_toml_dir = cargo_toml_path.parent()?;
+            let path_to_dep = cargo_toml_dir.join(base);
+            let absolute_path_to_dep = canonicalize(path_to_dep).ok()?;
+            let new_relative_path: String =
+                pathdiff::diff_paths(absolute_path_to_dep, &paths.output_dir)
+                    .and_then(|p| p.to_str().map(ToString::to_string))?;
+            let mut new_v = value.clone().into_owned();
+            if let Some(table) = new_v.as_table_mut() {
+                if let Some(path) = table.get_mut("path") {
+                    *path = new_relative_path.into();
+                }
+            }
+            value = Cow::Owned(new_v);
+        }
+
+        Some(value)
     }
 
     fn print_lints(lints: &toml::Value) -> String {
@@ -629,10 +665,13 @@ impl CargoConfig {
             .unwrap_or_default()
     }
 
-    fn fill_from_cargo_toml(&mut self, paths: &CargoConfigPaths) -> Result {
+    fn fill_from_cargo_toml(&mut self, paths: &Paths) -> Result {
         use toml::Value;
-        let config_str = fs::read_to_string(&paths.crate_config)?;
-        let workspace_str = paths
+        let Some(cargo_paths) = paths.cargo_toml_path.as_ref() else {
+            return err!("No 'Cargo.toml' file found to fill from.");
+        };
+        let config_str = fs::read_to_string(&cargo_paths.crate_config)?;
+        let workspace_str = cargo_paths
             .workspace_config
             .as_ref()
             .map(fs::read_to_string)
@@ -649,15 +688,12 @@ impl CargoConfig {
             .get("build-dependencies")
             .and_then(|v| v.as_table())
             .map_or(vec![], |t| {
-                t.iter()
-                    .filter_map(|(k, v)| {
-                        if !Self::is_workspace_table(v) {
-                            Some(Dependency::new(k.clone(), v.to_string(), None))
-                        } else {
-                            workspace_config_table_opt
-                                .and_then(|t| Self::get_package_version(t, k))
-                                .map(|t| Dependency::new(k.clone(), t.to_string(), None))
-                        }
+                t.keys()
+                    .filter_map(|k| {
+                        let workspace_deps = workspace_config_table_opt
+                            .and_then(|t| t.get("dependencies").and_then(|v| v.as_table()));
+                        Self::get_package_version(t, workspace_deps, k, paths)
+                            .map(|t| Dependency::new(k.clone(), t.to_string(), None))
                     })
                     .collect()
             });
@@ -1338,8 +1374,8 @@ fn eval_function_impl(
     let paths = Paths::new(options, name, &input_str)?;
 
     let mut cfg = CargoConfig::default();
-    if let Some(path) = &paths.cargo_toml_path {
-        cfg.fill_from_cargo_toml(path)?;
+    if paths.cargo_toml_path.is_some() {
+        cfg.fill_from_cargo_toml(&paths)?;
     }
     let attributes = cfg.extract_inline_attributes(input_fn_ast.attrs)?;
     let include_token_stream_impl = cfg.contains_dependency("proc-macro2");

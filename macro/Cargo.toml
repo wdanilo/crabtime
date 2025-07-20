@@ -11,7 +11,8 @@ license = "MIT OR Apache-2.0"
 proc-macro2 = { version = "1", features = ["span-locations"] }
 quote = "1"
 syn = { version = "2", features = ["full"] }
-toml = "0.8"
+toml = "0.9"
+pathdiff = "0.2"
 
 [build-dependencies]
 rustc_version = "0.4"
