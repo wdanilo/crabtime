@@ -1,6 +1,5 @@
 #![cfg_attr(nightly, feature(proc_macro_span))]
 #![cfg_attr(nightly, feature(proc_macro_diagnostic))]
-
 #![cfg_attr(not(nightly), allow(dead_code))]
 #![cfg_attr(not(nightly), allow(unused_macros))]
 #![cfg_attr(not(nightly), allow(unused_imports))]
@@ -10,7 +9,6 @@ mod path;
 
 use error::*;
 
-use std::fmt::Debug;
 use proc_macro2::Delimiter;
 use proc_macro2::LineColumn;
 use proc_macro2::Span;
@@ -18,16 +16,17 @@ use proc_macro2::TokenStream;
 use proc_macro2::TokenTree;
 use quote::ToTokens;
 use quote::quote;
-use std::fs::File;
+use std::collections::hash_map::DefaultHasher;
+use std::default::Default;
+use std::fmt::Debug;
 use std::fs;
+use std::fs::File;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
-use std::default::Default;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::Hash;
-use std::hash::Hasher;
 
 // =================
 // === Constants ===
@@ -47,11 +46,11 @@ const OUT_DIR: &str = env!("OUT_DIR");
 /// Rust keywords for special handling. This is not needed for this macro to work, it is only used
 /// to make `IntelliJ` / `RustRover` work correctly, as their `TokenStream` spans are incorrect.
 const KEYWORDS: &[&str] = &[
-    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum",
-    "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move",
-    "mut", "pub", "ref", "return", "self", "Self", "struct", "super", "trait", "true",
-    "type", "unsafe", "use", "where", "while", "abstract", "become", "box", "do", "final", "macro",
-    "override", "priv", "typeof", "unsized", "virtual", "yield", "try",
+    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
+    "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub",
+    "ref", "return", "self", "Self", "struct", "super", "trait", "true", "type", "unsafe", "use",
+    "where", "while", "abstract", "become", "box", "do", "final", "macro", "override", "priv",
+    "typeof", "unsized", "virtual", "yield", "try",
 ];
 
 // ==================
@@ -84,24 +83,35 @@ impl TokenRange {
 fn gen_prelude(include_token_stream_impl: bool, paths: &Paths) -> String {
     let warning_prefix = Level::WARNING_PREFIX;
     let error_prefix = Level::ERROR_PREFIX;
-    let prelude_tok_stream = if include_token_stream_impl { PRELUDE_FOR_TOKEN_STREAM } else { "" };
+    let prelude_tok_stream = if include_token_stream_impl {
+        PRELUDE_FOR_TOKEN_STREAM
+    } else {
+        ""
+    };
 
-    let workspace_path =
-        format!("pub const WORKSPACE_PATH: &str = r#\"{}\"#;", paths.workspace.display());
+    let workspace_path = format!(
+        "pub const WORKSPACE_PATH: &str = r#\"{}\"#;",
+        paths.workspace.display()
+    );
 
     #[cfg(nightly)]
-    let crate_config_path =
-        format!("pub const CRATE_CONFIG_PATH: &str = r#\"{}\"#;", paths.crate_config.display());
+    let crate_config_path = format!(
+        "pub const CRATE_CONFIG_PATH: &str = r#\"{}\"#;",
+        paths.crate_config.display()
+    );
     #[cfg(not(nightly))]
     let crate_config_path = "";
 
     #[cfg(nightly)]
-    let call_site_file_path =
-        format!("pub const CALL_SITE_FILE_PATH: &str = r#\"{}\"#;", paths.call_site_file.display());
+    let call_site_file_path = format!(
+        "pub const CALL_SITE_FILE_PATH: &str = r#\"{}\"#;",
+        paths.call_site_file.display()
+    );
     #[cfg(not(nightly))]
     let call_site_file_path = "";
 
-    format!("
+    format!(
+        "
         #[allow(unused_macros)]
         #[allow(unused_imports)]
         #[allow(clippy::all)]
@@ -140,7 +150,8 @@ fn gen_prelude(include_token_stream_impl: bool, paths: &Paths) -> String {
             {prelude_tok_stream}
             {PRELUDE_ADDONS}
         }}
-    ")
+    "
+    )
 }
 
 const PRELUDE_FOR_TOKEN_STREAM: &str = "
@@ -341,8 +352,9 @@ impl Paths {
             crate_config,
             call_site_file,
             cargo_toml_path,
-            one_shot_output_dir
-        }.init(options);
+            one_shot_output_dir,
+        }
+        .init(options);
         Ok(out)
     }
 
@@ -354,7 +366,13 @@ impl Paths {
         let workspace = path::parent(target)?.to_path_buf();
         let cargo_toml_path = None;
         let one_shot_output_dir = false;
-        Ok(Self { workspace, output_dir, cargo_toml_path, one_shot_output_dir }.init(options))
+        Ok(Self {
+            workspace,
+            output_dir,
+            cargo_toml_path,
+            one_shot_output_dir,
+        }
+        .init(options))
     }
 
     fn init(mut self, options: MacroOptions) -> Self {
@@ -450,11 +468,18 @@ fn find_cargo_configs(path: &Path) -> Result<CargoConfigPaths> {
     let mut candidates = Vec::new();
     loop {
         let candidate = current_path.join("Cargo.toml");
-        if candidate.is_file() { candidates.push(candidate) }
-        if !current_path.pop() { break }
+        if candidate.is_file() {
+            candidates.push(candidate)
+        }
+        if !current_path.pop() {
+            break;
+        }
     }
     let Some((crate_config, other_candidates)) = candidates.split_first() else {
-        return err!("No 'Cargo.toml' files found in parent directories of '{}'.", path.display())
+        return err!(
+            "No 'Cargo.toml' files found in parent directories of '{}'.",
+            path.display()
+        );
     };
 
     // Cargo uses the top-level workspace only.
@@ -465,7 +490,10 @@ fn find_cargo_configs(path: &Path) -> Result<CargoConfigPaths> {
         }
     }
     let crate_config = crate_config.clone();
-    Ok(CargoConfigPaths { crate_config, workspace_config })
+    Ok(CargoConfigPaths {
+        crate_config,
+        workspace_config,
+    })
 }
 
 // ===================
@@ -481,7 +509,11 @@ struct Dependency {
 
 impl Dependency {
     fn new(label: String, tokens_str: String, token_range: Option<TokenRange>) -> Self {
-        Self { label, tokens_str, token_range }
+        Self {
+            label,
+            tokens_str,
+            token_range,
+        }
     }
 
     fn to_config_string(&self) -> String {
@@ -490,7 +522,9 @@ impl Dependency {
 
     #[cfg(nightly)]
     fn span(&self) -> Span {
-        self.token_range.as_ref().map_or(Span::call_site(), |t| t.span())
+        self.token_range
+            .as_ref()
+            .map_or(Span::call_site(), |t| t.span())
     }
 }
 
@@ -514,15 +548,24 @@ impl CargoConfig {
     }
 
     fn print(&self) -> String {
-        let edition = self.edition.as_ref().map_or(DEFAULT_EDITION, |t| t.as_str());
-        let resolver = self.resolver.as_ref().map_or(DEFAULT_RESOLVER, |t| t.as_str());
+        let edition = self
+            .edition
+            .as_ref()
+            .map_or(DEFAULT_EDITION, |t| t.as_str());
+        let resolver = self
+            .resolver
+            .as_ref()
+            .map_or(DEFAULT_RESOLVER, |t| t.as_str());
         let lints_rust = &self.lints.rust;
         let lints_clippy = &self.lints.clippy;
-        let dependencies = self.dependencies.iter()
+        let dependencies = self
+            .dependencies
+            .iter()
             .map(|t| t.to_config_string())
             .collect::<Vec<_>>()
             .join("\n");
-        let out = format!("
+        let out = format!(
+            "
             [workspace]
             [package]
             name     = \"eval_project\"
@@ -538,7 +581,8 @@ impl CargoConfig {
 
             [lints.clippy]
             {lints_clippy}
-        ");
+        "
+        );
         out
     }
 
@@ -558,51 +602,75 @@ impl CargoConfig {
     }
 
     fn get_package_edition(table: &toml::Table) -> Option<&str> {
-        table.get("package")
+        table
+            .get("package")
             .and_then(toml::Value::as_table)
             .and_then(|pkg_table| pkg_table.get("edition"))
             .and_then(toml::Value::as_str)
     }
 
     fn get_package_version<'t>(table: &'t toml::Table, name: &str) -> Option<&'t toml::Value> {
-        table.get("dependencies")
+        table
+            .get("dependencies")
             .and_then(toml::Value::as_table)
             .and_then(|pkg_table| pkg_table.get(name))
             .filter(|v| v.is_str())
     }
 
     fn print_lints(lints: &toml::Value) -> String {
-        lints.as_table().map(|t| {
-            t.iter().map(|(k, v)| format!("{k} = {v}")).collect::<Vec<_>>().join("\n")
-        }).unwrap_or_default()
+        lints
+            .as_table()
+            .map(|t| {
+                t.iter()
+                    .map(|(k, v)| format!("{k} = {v}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default()
     }
 
     fn fill_from_cargo_toml(&mut self, paths: &CargoConfigPaths) -> Result {
         use toml::Value;
         let config_str = fs::read_to_string(&paths.crate_config)?;
-        let workspace_str = paths.workspace_config.as_ref().map(fs::read_to_string).transpose()?;
+        let workspace_str = paths
+            .workspace_config
+            .as_ref()
+            .map(fs::read_to_string)
+            .transpose()?;
         let config = toml::from_str::<Value>(&config_str)?;
-        let workspace_config_opt = workspace_str.map(|t| toml::from_str::<Value>(&t)).transpose()?;
-        let workspace_config_table_opt = workspace_config_opt.as_ref()
-            .and_then(|t| t.get("workspace")).and_then(|v| v.as_table());
+        let workspace_config_opt = workspace_str
+            .map(|t| toml::from_str::<Value>(&t))
+            .transpose()?;
+        let workspace_config_table_opt = workspace_config_opt
+            .as_ref()
+            .and_then(|t| t.get("workspace"))
+            .and_then(|v| v.as_table());
         let dependencies = config
             .get("build-dependencies")
             .and_then(|v| v.as_table())
-            .map_or(vec![], |t| t.iter().filter_map(|(k, v)|
-                if !Self::is_workspace_table(v) {
-                    Some(Dependency::new(k.clone(), v.to_string(), None))
-                } else {
-                    workspace_config_table_opt
-                        .and_then(|t| Self::get_package_version(t, k))
-                        .map(|t| Dependency::new(k.clone(), t.to_string(), None))
-                }
-            ).collect());
+            .map_or(vec![], |t| {
+                t.iter()
+                    .filter_map(|(k, v)| {
+                        if !Self::is_workspace_table(v) {
+                            Some(Dependency::new(k.clone(), v.to_string(), None))
+                        } else {
+                            workspace_config_table_opt
+                                .and_then(|t| Self::get_package_version(t, k))
+                                .map(|t| Dependency::new(k.clone(), t.to_string(), None))
+                        }
+                    })
+                    .collect()
+            });
         let edition = config
             .get("package")
             .and_then(|v| v.as_table())
             .and_then(|table| table.get("edition"))
-            .and_then(|v| if !Self::is_workspace_table(v) { v.as_str() } else {
-                workspace_config_table_opt.and_then(Self::get_package_edition)
+            .and_then(|v| {
+                if !Self::is_workspace_table(v) {
+                    v.as_str()
+                } else {
+                    workspace_config_table_opt.and_then(Self::get_package_edition)
+                }
             })
             .unwrap_or("2024");
         let lints = config.get("lints").map(|v| {
@@ -614,11 +682,15 @@ impl CargoConfig {
             let ws_lints = table_opt
                 .and_then(|t| t.get("lints"))
                 .and_then(|t| t.as_table());
-            let clippy = ws_lints.and_then(|t| t.get("clippy"))
-                .map(Self::print_lints).unwrap_or_default();
-            let rust = ws_lints.and_then(|t| t.get("rust"))
-                .map(Self::print_lints).unwrap_or_default();
-            LintsConfig {clippy, rust}
+            let clippy = ws_lints
+                .and_then(|t| t.get("clippy"))
+                .map(Self::print_lints)
+                .unwrap_or_default();
+            let rust = ws_lints
+                .and_then(|t| t.get("rust"))
+                .map(Self::print_lints)
+                .unwrap_or_default();
+            LintsConfig { clippy, rust }
         });
         self.dependencies.extend(dependencies);
         self.edition = Some(edition.to_string());
@@ -630,15 +702,20 @@ impl CargoConfig {
         let mut other_attributes = Vec::with_capacity(attributes.len());
         let mut new_dependencies = vec![];
         for attr in attributes {
-            let tokens = attr.parse_args::<TokenStream>().context("Failed to parse attributes")?;
+            let tokens = attr
+                .parse_args::<TokenStream>()
+                .context("Failed to parse attributes")?;
             let tokens_str = tokens.to_string().replace(" ", "");
-            let token_range = tokens.clone().into_iter().next()
+            let token_range = tokens
+                .clone()
+                .into_iter()
+                .next()
                 .zip(tokens.clone().into_iter().last())
                 .map(|(first, last)| TokenRange::new(first, last));
             if attr.path().is_ident("dependency") {
-                let (key, value) = tokens_str.split_once('=').context(||
-                    error!("Incorrect dependency '{tokens_str}'")
-                )?;
+                let (key, value) = tokens_str
+                    .split_once('=')
+                    .context(|| error!("Incorrect dependency '{tokens_str}'"))?;
                 let key = key.to_string();
                 let value = value.to_string();
                 new_dependencies.push(Dependency::new(key, value, token_range));
@@ -650,10 +727,12 @@ impl CargoConfig {
         }
         #[cfg(nightly)]
         for dependency in &new_dependencies {
-            warning!(dependency.span(),
+            warning!(
+                dependency.span(),
                 "When using the nightly Rust channel, dependencies should be specified in the \
                 [build-dependencies] section of your Cargo.toml file."
-            ).emit();
+            )
+            .emit();
         }
         self.dependencies.extend(new_dependencies);
         Ok(other_attributes.join("\n"))
@@ -673,7 +752,8 @@ fn create_project_skeleton(project_dir: &Path, cfg: CargoConfig, main: &str) -> 
 
     let main_rs = src_dir.join("main.rs");
     let mut file = File::create(&main_rs).context("Failed to create main.rs")?;
-    file.write_all(main.as_bytes()).context("Failed to write main.rs")?;
+    file.write_all(main.as_bytes())
+        .context("Failed to write main.rs")?;
     Ok(existed)
 }
 
@@ -687,7 +767,7 @@ fn get_host_target() -> Result<String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     for line in stdout.lines() {
         if let Some(stripped) = line.strip_prefix("host:") {
-            return Ok(stripped.trim().to_string())
+            return Ok(stripped.trim().to_string());
         }
     }
     err!("Could not determine host target from rustc")
@@ -745,9 +825,8 @@ fn expand_expand_macro(input: TokenStream) -> TokenStream {
         match &tokens[i] {
             TokenTree::Group(group) => {
                 let new_stream = expand_expand_macro(group.stream());
-                let new_group = TokenTree::Group(
-                    proc_macro2::Group::new(group.delimiter(), new_stream)
-                );
+                let new_group =
+                    TokenTree::Group(proc_macro2::Group::new(group.delimiter(), new_stream));
                 output.extend(std::iter::once(new_group));
             }
             _ => {
@@ -762,7 +841,7 @@ fn expand_expand_macro(input: TokenStream) -> TokenStream {
 fn expand_builtin_macro(
     name: &str,
     input: TokenStream,
-    f: &impl Fn(TokenStream) -> TokenStream
+    f: &impl Fn(TokenStream) -> TokenStream,
 ) -> TokenStream {
     let tokens: Vec<TokenTree> = input.into_iter().collect();
     let mut output = TokenStream::new();
@@ -782,8 +861,14 @@ fn expand_builtin_macro(
                                         if out_ident == name {
                                             if let TokenTree::Punct(ref excl) = tokens[i + 4] {
                                                 if excl.as_char() == '!' {
-                                                    if let TokenTree::Group(ref group) = tokens[i + 5] {
-                                                        let inner_rewritten = expand_builtin_macro(name, group.stream(), f);
+                                                    if let TokenTree::Group(ref group) =
+                                                        tokens[i + 5]
+                                                    {
+                                                        let inner_rewritten = expand_builtin_macro(
+                                                            name,
+                                                            group.stream(),
+                                                            f,
+                                                        );
                                                         let new_tokens = f(inner_rewritten);
                                                         output.extend(new_tokens);
                                                         i += 6;
@@ -806,7 +891,8 @@ fn expand_builtin_macro(
             TokenTree::Group(group) => {
                 let new_stream = expand_builtin_macro(name, group.stream(), f);
                 // Rebuild group with same delimiter.
-                let new_group = TokenTree::Group(proc_macro2::Group::new(group.delimiter(), new_stream));
+                let new_group =
+                    TokenTree::Group(proc_macro2::Group::new(group.delimiter(), new_stream));
                 output.extend(std::iter::once(new_group));
             }
             token => output.extend(std::iter::once(token.clone())),
@@ -852,7 +938,8 @@ struct PrintOutput {
 /// such as `RustRover`.
 fn print_tokens(tokens: &TokenStream) -> String {
     // Replaces `{` with `{{` and vice versa.
-    print_tokens_internal(tokens).output
+    print_tokens_internal(tokens)
+        .output
         .replace("{", "{{")
         .replace("}", "}}")
         .replace("{{%%%{{%%%{{", "{{ {")
@@ -886,7 +973,7 @@ fn print_tokens_internal(tokens: &TokenStream) -> PrintOutput {
                         } else {
                             ("{", "}")
                         }
-                    },
+                    }
                     Delimiter::Parenthesis => ("(", ")"),
                     Delimiter::Bracket => ("[", "]"),
                     _ => ("", ""),
@@ -909,14 +996,14 @@ fn print_tokens_internal(tokens: &TokenStream) -> PrintOutput {
                 let str = ident.to_string();
                 is_keyword = KEYWORDS.contains(&str.as_str());
                 str
-            },
+            }
             TokenTree::Literal(lit) => lit.to_string(),
             TokenTree::Punct(punct) => {
                 if punct.spacing() == proc_macro2::Spacing::Joint {
                     add_space = false;
                 }
                 punct.as_char().to_string()
-            },
+            }
         };
         debug!("{i}: [{token_start:?}-{token_end:?}] [{prev_token_end:?}]: {token}");
 
@@ -924,8 +1011,9 @@ fn print_tokens_internal(tokens: &TokenStream) -> PrintOutput {
         if is_brace || prev_token_was_brace {
             if let Some(prev_token_end) = prev_token_end {
                 if prev_token_end.line == token_start.line
-                && prev_token_end.column >= token_start.column
-                && output.ends_with(" ") {
+                    && prev_token_end.column >= token_start.column
+                    && output.ends_with(" ")
+                {
                     output.pop();
                 }
             }
@@ -934,12 +1022,16 @@ fn print_tokens_internal(tokens: &TokenStream) -> PrintOutput {
 
         // Pushing a space before and after keywords is for IntelliJ only.
         // Their token spans are invalid.
-        if is_keyword { output.push(' '); }
+        if is_keyword {
+            output.push(' ');
+        }
         output.push_str(&token_str);
         if add_space {
             output.push(' ');
         }
-        if is_keyword { output.push(' '); }
+        if is_keyword {
+            output.push(' ');
+        }
 
         first_token_start.get_or_insert(token_start);
         prev_token_end = Some(token_end);
@@ -957,7 +1049,7 @@ fn print_tokens_internal(tokens: &TokenStream) -> PrintOutput {
 
 enum Args {
     TokenStream { ident: syn::Ident },
-    Pattern { str: TokenStream }
+    Pattern { str: TokenStream },
 }
 
 impl Args {
@@ -981,10 +1073,15 @@ impl Args {
 }
 
 fn parse_args(
-    args: &syn::punctuated::Punctuated<syn::FnArg, syn::token::Comma>
+    args: &syn::punctuated::Punctuated<syn::FnArg, syn::token::Comma>,
 ) -> Option<(Args, TokenStream)> {
     let Some(arg) = args.first() else {
-        return Some((Args::Pattern { str: Default::default() }, TokenStream::new()))
+        return Some((
+            Args::Pattern {
+                str: Default::default(),
+            },
+            TokenStream::new(),
+        ));
     };
 
     // First try the specialized parsers, then fallback to our generic type handling.
@@ -993,7 +1090,7 @@ fn parse_args(
         .map(|t| (t, TokenStream::new()))
         .or_else(|| {
             let mut is_first = true;
-            let mut pat = quote!{};
+            let mut pat = quote! {};
             let mut code = TokenStream::new();
 
             for arg in args {
@@ -1002,7 +1099,6 @@ fn parse_args(
                 }
                 is_first = false;
                 if let syn::FnArg::Typed(pat_type) = arg {
-
                     if let syn::Pat::Ident(name) = &*pat_type.pat {
                         let name_str = name.ident.to_string();
                         let ty = &*pat_type.ty;
@@ -1056,45 +1152,68 @@ fn parse_inner_type(pfx: &str, ty: &syn::Type) -> Option<(TokenStream, TokenStre
             if let syn::Type::Path(inner_path) = &*ty_ref.elem {
                 if let Some(inner_seg) = inner_path.path.segments.last() {
                     if inner_seg.ident == "str" {
-                        let pat = quote!{#arg:expr};
-                        let code = quote!{crabtime::stringify_if_needed!{#arg}};
+                        let pat = quote! {#arg:expr};
+                        let code = quote! {crabtime::stringify_if_needed!{#arg}};
                         return Some((pat, code));
                     }
                 }
             }
-        },
+        }
         syn::Type::Path(inner_type_path) => {
             if let Some(inner_seg) = inner_type_path.path.segments.last() {
                 let ident_str = inner_seg.ident.to_string();
                 if ident_str == "String" {
-                    let pat = quote!{#arg:expr};
-                    let code = quote!{crabtime::stringify_if_needed!(#arg).to_string()};
+                    let pat = quote! {#arg:expr};
+                    let code = quote! {crabtime::stringify_if_needed!(#arg).to_string()};
                     return Some((pat, code));
-                } else if matches!(ident_str.as_str(),
-                    "usize" | "u8" | "u16" | "u32" | "u64" | "u128" |
-                    "isize" | "i8" | "i16" | "i32" | "i64" | "i128"
+                } else if matches!(
+                    ident_str.as_str(),
+                    "usize"
+                        | "u8"
+                        | "u16"
+                        | "u32"
+                        | "u64"
+                        | "u128"
+                        | "isize"
+                        | "i8"
+                        | "i16"
+                        | "i32"
+                        | "i64"
+                        | "i128"
                 ) {
-                    return Some((quote!{#arg:literal}, quote!{#arg}));
+                    return Some((quote! {#arg:literal}, quote! {#arg}));
                 }
             }
-        },
+        }
         _ => {}
     }
     None
 }
 
 fn parse_args_for_pattern(arg: &syn::FnArg) -> Option<Args> {
-    let syn::FnArg::Typed(pat) = arg else { return None };
-    let syn::Pat::Macro(m) = &*pat.pat else { return None };
-    Some(Args::Pattern {str: m.mac.tokens.clone() })
+    let syn::FnArg::Typed(pat) = arg else {
+        return None;
+    };
+    let syn::Pat::Macro(m) = &*pat.pat else {
+        return None;
+    };
+    Some(Args::Pattern {
+        str: m.mac.tokens.clone(),
+    })
 }
 
 fn parse_args_for_token_stream(arg: &syn::FnArg) -> Option<Args> {
-    let syn::FnArg::Typed(pat) = arg else { return None };
-    let syn::Pat::Ident(pat_ident) = &*pat.pat else { return None };
+    let syn::FnArg::Typed(pat) = arg else {
+        return None;
+    };
+    let syn::Pat::Ident(pat_ident) = &*pat.pat else {
+        return None;
+    };
     let tp = &pat.ty;
     let tp_str = quote! { #tp }.to_string();
-    if tp_str != "TokenStream" { return None }
+    if tp_str != "TokenStream" {
+        return None;
+    }
     let ident = pat_ident.ident.clone();
     Some(Args::TokenStream { ident })
 }
@@ -1105,15 +1224,16 @@ const WRONG_ARGS: &str = "Function should have zero or one argument, one of:
 ";
 
 fn prepare_input_code(
-    attributes:&str,
+    attributes: &str,
     body: &str,
     output_tp: &str,
     include_token_stream_impl: bool,
-    paths: &Paths
+    paths: &Paths,
 ) -> String {
     let body_esc: String = body.chars().flat_map(|c| c.escape_default()).collect();
     let prelude = gen_prelude(include_token_stream_impl, paths);
-    format!("
+    format!(
+        "
         {attributes}
         {prelude}
 
@@ -1193,17 +1313,18 @@ impl syn::parse::Parse for MacroOptions {
 #[proc_macro_attribute]
 pub fn eval_function(
     attr: proc_macro::TokenStream,
-    item: proc_macro::TokenStream
+    item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     // SAFETY: Used to panic in case of error.
     #[allow(clippy::unwrap_used)]
-    eval_function_impl(attr, item).unwrap_or_compile_error().into()
+    eval_function_impl(attr, item)
+        .unwrap_or_compile_error()
+        .into()
 }
-
 
 fn eval_function_impl(
     attr: proc_macro::TokenStream,
-    item: proc_macro::TokenStream
+    item: proc_macro::TokenStream,
 ) -> Result<TokenStream> {
     let options = syn::parse::<MacroOptions>(attr)?;
     let start_time = get_current_time();
@@ -1213,7 +1334,7 @@ fn eval_function_impl(
     let name = &input_fn_ast.sig.ident.to_string();
     let body_ast = &input_fn_ast.block.stmts;
     let output_tp = &input_fn_ast.sig.output;
-    let input_str = expand_output_macro(expand_quote_macro(quote!{ #(#body_ast)* })).to_string();
+    let input_str = expand_output_macro(expand_quote_macro(quote! { #(#body_ast)* })).to_string();
     let paths = Paths::new(options, name, &input_str)?;
 
     let mut cfg = CargoConfig::default();
@@ -1224,14 +1345,14 @@ fn eval_function_impl(
     let include_token_stream_impl = cfg.contains_dependency("proc-macro2");
     let output_tp_str = match output_tp {
         syn::ReturnType::Default => "()".to_string(),
-        syn::ReturnType::Type(_, tp) => quote!{#tp}.to_string(),
+        syn::ReturnType::Type(_, tp) => quote! {#tp}.to_string(),
     };
     let input_code = prepare_input_code(
         &attributes,
         &input_str,
         &output_tp_str,
         include_token_stream_impl,
-        &paths
+        &paths,
     );
     debug!("INPUT CODE: {input_code}");
     let mut output_dir_str = String::new();
@@ -1245,7 +1366,8 @@ fn eval_function_impl(
     let output_code = parse_output(&output);
     let duration = format_duration(timer.elapsed());
     let options_doc = format!("{options:#?}").replace("\n", "\n/// ");
-    let macro_code = format!("
+    let macro_code = format!(
+        "
         /// # Compilation Stats
         /// Start: {start_time}
         /// Duration: {duration}
@@ -1255,10 +1377,12 @@ fn eval_function_impl(
         #[cfg(any())]
         const _: () = ();
         {output_code}
-    ");
+    "
+    );
 
     debug!("BODY: {macro_code}");
-    let out: TokenStream = macro_code.parse()
+    let out: TokenStream = macro_code
+        .parse()
         .map_err(|err| error!("{err:?}"))
         .context("Failed to parse generated code.")?;
     debug!("OUTPUT: {out} ");
@@ -1272,37 +1396,43 @@ fn eval_function_impl(
 #[proc_macro_attribute]
 pub fn function(
     attr: proc_macro::TokenStream,
-    item: proc_macro::TokenStream
+    item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     // SAFETY: Used to panic in case of error.
     #[allow(clippy::unwrap_used)]
-    function_impl(attr, item, false).unwrap_or_compile_error().into()
+    function_impl(attr, item, false)
+        .unwrap_or_compile_error()
+        .into()
 }
 
 #[proc_macro_attribute]
 pub fn statement(
     attr: proc_macro::TokenStream,
-    item: proc_macro::TokenStream
+    item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     // SAFETY: Used to panic in case of error.
     #[allow(clippy::unwrap_used)]
-    function_impl(attr, item, false).unwrap_or_compile_error().into()
+    function_impl(attr, item, false)
+        .unwrap_or_compile_error()
+        .into()
 }
 
 #[proc_macro_attribute]
 pub fn expression(
     attr: proc_macro::TokenStream,
-    item: proc_macro::TokenStream
+    item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     // SAFETY: Used to panic in case of error.
     #[allow(clippy::unwrap_used)]
-    function_impl(attr, item, true).unwrap_or_compile_error().into()
+    function_impl(attr, item, true)
+        .unwrap_or_compile_error()
+        .into()
 }
 
 fn split_attrs(attrs: Vec<syn::Attribute>) -> (Vec<syn::Attribute>, Vec<syn::Attribute>) {
-    let (outer, inner): (Vec<_>, Vec<_>) = attrs.into_iter().partition(|attr| {
-        matches!(attr.style, syn::AttrStyle::Outer)
-    });
+    let (outer, inner): (Vec<_>, Vec<_>) = attrs
+        .into_iter()
+        .partition(|attr| matches!(attr.style, syn::AttrStyle::Outer));
     (outer, inner)
 }
 
@@ -1321,8 +1451,8 @@ fn function_impl(
     let (args, args_code) = parse_args(args_ast).context(|| error!(WRONG_ARGS))?;
     let args_pattern = args.pattern();
     let args_setup = args.setup();
-    let body = quote!{ #(#body_ast)* };
-    let input_str = expand_expand_macro(quote!{ #(#body_ast)* });
+    let body = quote! { #(#body_ast)* };
+    let input_str = expand_expand_macro(quote! { #(#body_ast)* });
 
     // Check if the expansion engine is Rust Analyzer. If so, we need to generate
     // a code which looks like a function to enable type hints.
@@ -1346,8 +1476,8 @@ fn function_impl(
     let attrs_vec = input_fn_ast.attrs;
     let (outer_attrs_vec, inner_attrs_vec) = split_attrs(attrs_vec);
 
-    let outer_attrs = quote!{ #(#outer_attrs_vec)* };
-    let inner_attrs = quote!{ #(#inner_attrs_vec)* };
+    let outer_attrs = quote! { #(#outer_attrs_vec)* };
+    let inner_attrs = quote! { #(#inner_attrs_vec)* };
     let mut out = quote! {
         {
             #[crabtime::eval_function(#attr)]
