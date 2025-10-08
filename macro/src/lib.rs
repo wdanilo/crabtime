@@ -770,35 +770,25 @@ fn expand_builtin_macro(
     let mut i = 0;
 
     while i < len {
-        // Check for the pattern: crabtime :: output ! ( group )
-        if i + 5 < len {
-            if let TokenTree::Ident(ref ident) = tokens[i] {
-                if ident == GEN_MOD {
-                    if let TokenTree::Punct(ref colon1) = tokens[i + 1] {
-                        if colon1.as_char() == ':' {
-                            if let TokenTree::Punct(ref colon2) = tokens[i + 2] {
-                                if colon2.as_char() == ':' {
-                                    if let TokenTree::Ident(ref out_ident) = tokens[i + 3] {
-                                        if out_ident == name {
-                                            if let TokenTree::Punct(ref excl) = tokens[i + 4] {
-                                                if excl.as_char() == '!' {
-                                                    if let TokenTree::Group(ref group) = tokens[i + 5] {
-                                                        let inner_rewritten = expand_builtin_macro(name, group.stream(), f);
-                                                        let new_tokens = f(inner_rewritten);
-                                                        output.extend(new_tokens);
-                                                        i += 6;
-                                                        continue;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        if i + 5 < len
+            // Check for the pattern: crabtime :: output ! ( group )
+            && let TokenTree::Ident(ref ident) = tokens[i]
+            && ident == GEN_MOD
+            && let TokenTree::Punct(ref colon1) = tokens[i + 1]
+            && colon1.as_char() == ':'
+            && let TokenTree::Punct(ref colon2) = tokens[i + 2]
+            && colon2.as_char() == ':'
+            && let TokenTree::Ident(ref out_ident) = tokens[i + 3]
+            && out_ident == name
+            && let TokenTree::Punct(ref excl) = tokens[i + 4]
+            && excl.as_char() == '!'
+            && let TokenTree::Group(ref group) = tokens[i + 5]
+        {
+            let inner_rewritten = expand_builtin_macro(name, group.stream(), f);
+            let new_tokens = f(inner_rewritten);
+            output.extend(new_tokens);
+            i += 6;
+            continue;
         }
 
         // Recurse into groups or pass through token.
