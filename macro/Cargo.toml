@@ -1,6 +1,6 @@
 [package]
 name = "crabtime-internal"
-version = "1.1.3"
+version = "1.1.4"
 authors = ["Wojciech Danilo <wojciech.danilo@gmail.com>"]
 edition = { workspace = true }
 description = "Helper for the crabtime crate."
@@ -8,7 +8,7 @@ keywords = ["macros"]
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-proc-macro2 = { version = "1", features = ["span-locations"] }
+proc-macro2 = { version = "1.0.101", features = ["span-locations"] }
 quote = "1"
 syn = { version = "2", features = ["full"] }
 toml = "0.8"
