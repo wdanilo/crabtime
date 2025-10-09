@@ -2,6 +2,7 @@
 name = "crabtime-test-stable-no-std"
 version = "1.0.0"
 edition = "2024"
+publish = false
 
 [dependencies]
 crabtime = { path = "../../lib", default-features = false }
