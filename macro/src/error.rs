@@ -1,6 +1,6 @@
-use std::fmt::Debug;
 use proc_macro2::Span;
 use proc_macro2::TokenStream;
+use std::fmt::Debug;
 
 // =============
 // === Level ===
@@ -36,11 +36,13 @@ impl From<Level> for proc_macro::Level {
 }
 
 pub(crate) fn print(level: Level, message: &str) {
-    #[cfg(nightly)] {
+    #[cfg(nightly)]
+    {
         let span = proc_macro::Span::call_site();
         proc_macro::Diagnostic::spanned(span, level.into(), message).emit();
     }
-    #[cfg(not(nightly))] {
+    #[cfg(not(nightly))]
+    {
         println!("{} {message}", level.prefix());
     }
 }
@@ -49,14 +51,14 @@ macro_rules! debug         { ($($ts:tt)*) => { if DEBUG { println!( $($ts)* )}  
 macro_rules! print_warning { ($($ts:tt)*) => { print (Level::Warning, &format!( $($ts)* )); }; }
 macro_rules! print_error   { ($($ts:tt)*) => { print (Level::Error,   &format!( $($ts)* )); }; }
 pub(crate) use debug;
-pub(crate) use print_warning;
 pub(crate) use print_error;
+pub(crate) use print_warning;
 
 // ==============
 // === Errors ===
 // ==============
 
-pub(crate) type Result<T=(), E=Issue> = std::result::Result<T, E>;
+pub(crate) type Result<T = (), E = Issue> = std::result::Result<T, E>;
 
 pub(crate) struct Issue {
     pub level: Level,
@@ -67,7 +69,12 @@ pub(crate) struct Issue {
 
 impl Issue {
     pub fn msg(level: Level, span: Option<Span>, message: String) -> Self {
-        Self { level, span, message, context: None }
+        Self {
+            level,
+            span,
+            message,
+            context: None,
+        }
     }
 
     pub fn context(mut self, f: impl FnOnce() -> Issue) -> Self {
@@ -78,8 +85,11 @@ impl Issue {
     pub fn message_with_cause(&self) -> String {
         match &self.context {
             None => self.message.clone(),
-            Some(context) =>
-                format!("{}\nCaused by: {}", self.message, context.message_with_cause()),
+            Some(context) => format!(
+                "{}\nCaused by: {}",
+                self.message,
+                context.message_with_cause()
+            ),
         }
     }
 
@@ -121,10 +131,10 @@ macro_rules! issue   {
 macro_rules! error   { ($($ts:tt)*) => { issue! { Level::Error,   $($ts)* }}; }
 macro_rules! warning { ($($ts:tt)*) => { issue! { Level::Warning, $($ts)* }}; }
 macro_rules! err     { ($($ts:tt)*) => { Err(error!($($ts)*)) }; }
-pub(crate) use issue;
-pub(crate) use error;
-pub(crate) use warning;
 pub(crate) use err;
+pub(crate) use error;
+pub(crate) use issue;
+pub(crate) use warning;
 
 // ===============
 // === Context ===
@@ -134,8 +144,10 @@ pub(crate) trait Context<T, I> {
     fn context(self, issue: I) -> Result<T>;
 }
 
-impl<T, I> Context<T, I> for Result<T, Issue> where
-I: FnOnce() -> Issue {
+impl<T, I> Context<T, I> for Result<T, Issue>
+where
+    I: FnOnce() -> Issue,
+{
     fn context(self, issue: I) -> Result<T> {
         self.map_err(|e| e.context(issue))
     }
@@ -147,8 +159,10 @@ impl<T> Context<T, &'static str> for Result<T, Issue> {
     }
 }
 
-impl<T, E: Debug, I> Context<T, I> for Result<T, E> where
-I: FnOnce() -> Issue {
+impl<T, E: Debug, I> Context<T, I> for Result<T, E>
+where
+    I: FnOnce() -> Issue,
+{
     fn context(self, issue: I) -> Result<T> {
         self.map_err(|e| Issue::from(e)).context(issue)
     }
@@ -160,8 +174,10 @@ impl<T, E: Debug> Context<T, &'static str> for Result<T, E> {
     }
 }
 
-impl<T, I> Context<T, I> for Option<T> where
-I: FnOnce() -> Issue {
+impl<T, I> Context<T, I> for Option<T>
+where
+    I: FnOnce() -> Issue,
+{
     fn context(self, issue: I) -> Result<T> {
         self.ok_or_else(issue)
     }

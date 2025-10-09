@@ -854,7 +854,9 @@ macro_rules! output {
 /// AVAILABLE ONLY WITHIN THE CRABTIME MACRO.
 #[macro_export]
 macro_rules! quote {
-    ($($ts:tt)*) => { String::new() };
+    ($($ts:tt)*) => {
+        String::new()
+    };
 }
 
 /// AVAILABLE ONLY WITHIN THE CRABTIME MACRO.
@@ -922,7 +924,8 @@ mod tests {
         let _p = mod_b::Generated;
     }
 
-    #[test] fn interpolation_before_brace() {
+    #[test]
+    fn interpolation_before_brace() {
         #[crabtime::function]
         fn interpolation_before_brace() {
             let is_a_branches = "A => true, B => false";
