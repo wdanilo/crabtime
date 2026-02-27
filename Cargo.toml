@@ -42,7 +42,7 @@ renamed_function_params = "warn"
 semicolon_outside_block = "warn"
 trivially_copy_pass_by_ref = "warn"
 tuple_array_conversions = "warn"
-unchecked_duration_subtraction = "warn"
+unchecked_time_subtraction = "warn"
 uninlined_format_args = "warn"
 unnecessary_box_returns = "warn"
 unnecessary_safety_doc = "warn"
@@ -61,3 +61,7 @@ unwrap_used = "warn"
 #multiple_crate_versions = "warn"
 #indexing_slicing = "warn"
 #allow_attributes = "warn" // false positives
+
+[profile.panic-abort]
+inherits = "dev"
+panic = "abort"

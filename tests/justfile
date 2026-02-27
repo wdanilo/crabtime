@@ -1,0 +1,16 @@
+test-nightly:
+    cd nightly && cargo run
+
+test-nightly-with-custom-build $CARGO_BUILD_BUILD_DIR="custom-build":
+    cd nightly-with-custom-build && cargo run
+
+test-nightly-with-custom-target $CARGO_TARGET_DIR="custom-target":
+    cd nightly-with-custom-target && cargo run
+
+test-stable:
+    cd stable && cargo run
+
+test-stable-no-std:
+    cd stable-no-std && cargo run --profile panic-abort
+
+test: test-nightly test-nightly-with-custom-build test-nightly-with-custom-target test-stable test-stable-no-std

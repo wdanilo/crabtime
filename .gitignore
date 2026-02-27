@@ -1,3 +1,5 @@
 /target
 **/*.rs.bk
 .idea/
+tests/nightly-with-custom-build/custom-build
+tests/nightly-with-custom-target/custom-target

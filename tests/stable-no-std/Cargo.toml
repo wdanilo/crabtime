@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 crabtime = { path = "../../lib", default-features = false }
+libc = { version = "0.2", default-features = false }
 
 [lints]
 workspace = true

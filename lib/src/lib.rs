@@ -460,8 +460,9 @@
 //! ```
 //!
 //! The cache is always written to
-//! `<project_dir>/target/debug/build/crabtime/<module>/<macro_name>`. The defaults are presented
-//! below:
+//! `<project_dir>/target/debug/build/crabtime/<module>/<macro_name>`
+//! (or the equivalent in the custom build.build-dir directory).
+//! The defaults are presented below:
 //!
 //! |                      | Rust Unstable           | Rust Stable                               |
 //! | :---                 | :---                    | :---                                      |
@@ -854,7 +855,9 @@ macro_rules! output {
 /// AVAILABLE ONLY WITHIN THE CRABTIME MACRO.
 #[macro_export]
 macro_rules! quote {
-    ($($ts:tt)*) => { String::new() };
+    ($($ts:tt)*) => {
+        String::new()
+    };
 }
 
 /// AVAILABLE ONLY WITHIN THE CRABTIME MACRO.
@@ -922,7 +925,8 @@ mod tests {
         let _p = mod_b::Generated;
     }
 
-    #[test] fn interpolation_before_brace() {
+    #[test]
+    fn interpolation_before_brace() {
         #[crabtime::function]
         fn interpolation_before_brace() {
             let is_a_branches = "A => true, B => false";

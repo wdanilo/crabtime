@@ -1,4 +1,12 @@
-// === Rust Stable Test ===
+#![no_std]
+#![no_main]
+
+use core::panic::PanicInfo;
+
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    unsafe { libc::exit(1) }
+}
 
 #[crabtime::function]
 fn gen_positions(components: Vec<String>) {
@@ -14,6 +22,25 @@ fn gen_positions(components: Vec<String>) {
 }
 gen_positions!(["X", "Y", "Z", "W"]);
 
+#[crabtime::function]
+fn gen_paths() {
+    let workspace_path = format!("\"{}\"", crate::crabtime::WORKSPACE_PATH);
+    crabtime::output! {
+        const WORKSPACE_PATH: &str = {{workspace_path}};
+    }
+}
+gen_paths!();
+
+#[unsafe(no_mangle)]
 fn main() {
     let _p1 = Position2::X;
+    let path = WORKSPACE_PATH.as_bytes();
+    let prefix = env!("CARGO_MANIFEST_DIR").as_bytes();
+    let mut index = 0;
+    while index < path.len() {
+        assert!(path[index] == prefix[index]);
+        index += 1;
+    }
+
+    unsafe { libc::exit(0) }
 }
