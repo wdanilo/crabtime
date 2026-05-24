@@ -700,6 +700,7 @@ fn run_cargo_project(project_dir: &PathBuf) -> Result<String> {
         .arg("run")
         .arg("--target")
         .arg(&host_target)
+        .env_remove("RUSTFLAGS")
         .current_dir(project_dir)
         .output()
         .context("Failed to execute cargo run")?;
